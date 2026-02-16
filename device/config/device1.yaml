@@ -18,11 +18,6 @@ peristaltic:
   dir_forward_pin: "Q0.1"
   dir_reverse_pin: "Q0.2"
   speed_pin: "Q0.7"
-  dir_driver_port: "/dev/ttySC3"
-  dir_driver_address: 76
-  dir_driver_baudrate: 9600
-  dir_driver_parity: "N"
-  dir_driver_timeout: 0.3
 
 # MainGUI_v5 PID valve pin mapping + PID defaults
 pid_valve:
@@ -38,13 +33,10 @@ pid_valve:
   output_max: 1.0
   setpoint_default: 80.0
 
-# Current backend flow driver is SLF3S USB serial-based.
+# MainGUI_v5 flow pulse meter
 flow_sensor:
-  port: "/dev/serial/by-id/usb-Sensirion_AG_Sensirion_RS485-USB_Cable_FT7TV0U4-if00-port0"
-  medium: "water"
-  interval_ms: 20
-  scale_factor: 500.0
-  stale_restart_limit: 20
+  gpio_bcm: 27
+  pulses_per_liter: 6800.0
 
 # Explicit MainGUI_v5 pinout reference
 maingui_v5_pinout:

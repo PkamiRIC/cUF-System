@@ -1,93 +1,98 @@
+import signal
 import threading
+import time
 from typing import Optional
-from pathlib import Path
-import sys
 
 from infra.config import FlowSensorConfig
 
-_OLD_CODES = Path(__file__).resolve().parents[2] / "Old_Codes"
-if str(_OLD_CODES) not in sys.path:
-    sys.path.append(str(_OLD_CODES))
-
 try:
-    from slf3s_usb_sensor import SLF3SUSBFlowSensor  # type: ignore
-except Exception:
-    SLF3SUSBFlowSensor = None
+    import RPi.GPIO as GPIO  # type: ignore
+except Exception:  # pragma: no cover
+    GPIO = None
 
 
 class FlowSensor:
+    """
+    MainGUI_v5-style pulse flow meter.
+    Converts pulses to mL/min and accumulates total mL.
+    """
+
     def __init__(self, config: FlowSensorConfig) -> None:
         self.config = config
-        self._sensor = None
         self._running = False
         self._lock = threading.Lock()
         self._last_error: Optional[str] = None
-        self._last_data = {
-            "flow_ml_min": 0.0,
-            "total_ml": 0.0,
-            "total_l": 0.0,
-        }
+        self._pulse_count = 0
+        self._flow_ml_min = 0.0
+        self._total_ml = 0.0
+        self._worker: Optional[threading.Thread] = None
 
-    def _ensure_sensor(self):
-        if SLF3SUSBFlowSensor is None:
-            raise RuntimeError(
-                "SLF3S driver is unavailable. Ensure 'device/Old_Codes/slf3s_usb_sensor.py' and pyserial are installed."
-            )
-        if self._sensor is not None:
-            return self._sensor
-        self._sensor = SLF3SUSBFlowSensor(
-            port=self.config.port,
-            medium=self.config.medium,
-            interval_ms=self.config.interval_ms,
-            scale_factor=self.config.scale_factor,
-            stale_restart_limit=self.config.stale_restart_limit,
-            stale_seconds=self.config.stale_seconds,
-            auto_start=False,
-        )
-        return self._sensor
+    def _pulse_callback(self, channel):
+        with self._lock:
+            self._pulse_count += 1
+
+    def _loop(self):
+        while self._running:
+            time.sleep(1.0)
+            with self._lock:
+                pulses = self._pulse_count
+                self._pulse_count = 0
+                liters_per_min = (pulses / float(self.config.pulses_per_liter)) * 60.0
+                self._flow_ml_min = liters_per_min * 1000.0
+                self._total_ml += (pulses / float(self.config.pulses_per_liter)) * 1000.0
 
     def start(self) -> None:
+        if GPIO is None:
+            self._last_error = "RPi.GPIO not available"
+            self._running = False
+            return
+
         with self._lock:
-            sensor = self._ensure_sensor()
-            sensor.start(interval_ms=self.config.interval_ms)
-            self._running = True
-            self._last_error = None
+            if self._running:
+                return
+
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.config.gpio_bcm, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            GPIO.add_event_detect(
+                self.config.gpio_bcm,
+                GPIO.RISING,
+                callback=self._pulse_callback,
+                bouncetime=1,
+            )
+            signal.signal(signal.SIGINT, lambda *_: GPIO.cleanup())
+            with self._lock:
+                self._running = True
+                self._last_error = None
+            self._worker = threading.Thread(target=self._loop, daemon=True)
+            self._worker.start()
+        except Exception as exc:
+            with self._lock:
+                self._running = False
+                self._last_error = str(exc)
 
     def stop(self) -> None:
         with self._lock:
-            if self._sensor is None:
-                self._running = False
-                return
+            self._running = False
+        if GPIO is not None:
             try:
-                self._sensor.stop()
-            finally:
-                self._running = False
+                GPIO.remove_event_detect(self.config.gpio_bcm)
+            except Exception:
+                pass
 
     def reset_totals(self) -> None:
         with self._lock:
-            sensor = self._ensure_sensor()
-            sensor.reset_totals()
-            self._last_data["total_ml"] = 0.0
-            self._last_data["total_l"] = 0.0
-            self._last_error = None
+            self._flow_ml_min = 0.0
+            self._total_ml = 0.0
+            self._pulse_count = 0
 
     def read(self) -> dict:
         with self._lock:
-            if self._sensor is None:
-                return dict(self._last_data)
-            try:
-                data = self._sensor.read()
-                self._last_data = {
-                    "flow_ml_min": float(data.get("flow_ml_min", 0.0)),
-                    "total_ml": float(data.get("total_ml", 0.0)),
-                    "total_l": float(data.get("total_l", 0.0)),
-                }
-                self._last_error = None
-                return dict(self._last_data)
-            except Exception as exc:
-                # Keep last good values to avoid UI flapping on transient transport errors.
-                self._last_error = str(exc)
-                return dict(self._last_data)
+            return {
+                "flow_ml_min": float(self._flow_ml_min),
+                "total_ml": float(self._total_ml),
+                "total_l": float(self._total_ml) / 1000.0,
+            }
 
     def is_running(self) -> bool:
         with self._lock:
@@ -98,13 +103,9 @@ class FlowSensor:
             return self._last_error
 
     def close(self) -> None:
-        with self._lock:
-            if self._sensor is None:
-                self._running = False
-                return
+        self.stop()
+        if GPIO is not None:
             try:
-                self._sensor.close()
+                GPIO.cleanup()
             except Exception:
                 pass
-            self._sensor = None
-            self._running = False
