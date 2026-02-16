@@ -1,0 +1,95 @@
+device_id: "device2"
+network:
+  api_port: 8002
+auth:
+  advanced_controls_password: "raspberry"
+relay:
+  port: "/dev/ttySC3"
+  address: 1
+  baudrate: 9600
+  parity: "N"
+  timeout: 0.3
+rotary_valve:
+  port: "/dev/ttySC3"
+  address: 1
+  baudrate: 9600
+  parity: "N"
+  timeout: 0.3
+syringe:
+  port: "/dev/ttySC3"
+  address: 76
+  baudrate: 9600
+  steps_per_ml: 7804878
+  velocity_calib: 8000
+  timeout: 1.0
+vertical_axis:
+  port: "/dev/ttySC3"
+  address: 78        # 0x4E
+  steps_per_ml: 2000
+  velocity_calib: 1000
+  steps_per_mm: 2000
+  min_mm: 0
+  max_mm: 25
+  timeout: 1.0
+horizontal_axis:
+  port: "/dev/ttySC3"
+  address: 77        # 0x4D
+  steps_per_ml: 2000
+  velocity_calib: 1000
+  steps_per_mm: 2000
+  min_mm: 0
+  max_mm: null
+  timeout: 1.0
+  vertical_guard_mm: 10
+flow_sensor:
+  port: "/dev/serial/by-id/usb-Sensirion_AG_Sensirion_RS485-USB_Cable_FT7TV0U4-if00-port0"
+  medium: "water"
+  interval_ms: 20
+  scale_factor: 500.0
+  stale_restart_limit: 20
+sequence1:
+  post_volume_wait_s: 2.0
+  early_complete_ratio: 0.925
+  early_complete_wait_s: 17.5
+  stagnant_timeout_s: 20.0
+  stagnant_epsilon_ml: 0.1
+sequence2:
+  target_volume_ml: 50.0
+  early_complete_ratio: 0.925
+  early_complete_wait_s: 17.5
+  stagnant_timeout_s: 20.0
+  stagnant_epsilon_ml: 0.1
+temperature:
+  command_pin: "Q0.6"
+  ready_pin: "I0.11"
+  ready_gpio_pin: 4
+  tec_port: "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_DP05MXL4-if00-port0"
+  tec_address: 2
+  tec_baudrate: 57600
+  tec_timeout_s: 0.35
+  tec_poll_interval_s: 0.5
+  tec_channel: 1
+  tec_default_target_c: 58.0
+  tec_ready_tolerance_c: 0.5
+peristaltic:
+  enable_pin: "Q0.0"
+  dir_forward_pin: "Q0.1"
+  dir_reverse_pin: "Q0.2"
+  speed_pin: "Q0.7"
+  dir_driver_port: "/dev/ttySC3"
+  dir_driver_address: 76
+  dir_driver_baudrate: 9600
+  dir_driver_parity: "N"
+  dir_driver_timeout: 0.3
+pid_valve:
+  step_pin: "Q0.5"
+  dir_pin: "Q0.4"
+  en_pin: "Q0.3"
+  hall_pin: "I0.12"
+  pid_kp: 1.6
+  pid_ki: 0.25
+  pid_kd: 0.02
+  sample_time: 0.08
+  output_min: -1.5
+  output_max: 1.5
+  setpoint_default: 1.0

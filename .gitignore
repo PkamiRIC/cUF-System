@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual environments
+.venv
+venv
+env
+.env
+
+# Node (for future React UI)
+node_modules/
+dist/
+
+ui/**/node_modules
+ui/**/.env
+ui/**/.env.*
+ui/**/dist
+ui/**/.next
+ui/**/.turbo
+ui/**/.cache
+ui/**/out
+
+# Build/runtime noise
+*.bak
