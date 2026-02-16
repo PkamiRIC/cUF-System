@@ -69,9 +69,10 @@ class PidValveController:
     def _start_hall_monitor(self) -> None:
         def monitor():
             while True:
-                val = safe_plc_call("digital_read", plc.digital_read, self.config.hall_pin)
-                if isinstance(val, int):
-                    self.state.hall_state = val
+                if plc:
+                    val = safe_plc_call("digital_read", plc.digital_read, self.config.hall_pin)
+                    if isinstance(val, int):
+                        self.state.hall_state = val
                 time.sleep(1.0)
 
         threading.Thread(target=monitor, daemon=True).start()

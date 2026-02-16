@@ -125,6 +125,7 @@ export default function LegacyConsole() {
   }
 
   useEffect(() => {
+    addLog("Control console ready.")
     refreshStatus()
     const poll = setInterval(refreshStatus, 1000)
     const tick = setInterval(() => setElapsedSeconds((s) => s + 1), 1000)
@@ -452,7 +453,7 @@ export default function LegacyConsole() {
         <section className="legacy-panel legacy-log-panel">
           <h2 className="legacy-panel-title">Event Log</h2>
           <div className="legacy-log-box">
-            {eventLog.length === 0 && <div>{withTimestamp("Control console ready.")}</div>}
+            {eventLog.length === 0 && <div>Control console ready.</div>}
             {eventLog.map((line, idx) => (
               <div key={`${idx}-${line.slice(0, 32)}`}>{line}</div>
             ))}
