@@ -7,7 +7,7 @@ import yaml
 
 @dataclass
 class NetworkConfig:
-    api_port: int = 8002
+    api_port: int = 8001
 
 
 @dataclass
@@ -131,7 +131,7 @@ class AuthConfig:
 
 @dataclass
 class DeviceConfig:
-    device_id: str = "device2"
+    device_id: str = "device1"
     network: NetworkConfig = field(default_factory=NetworkConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
     rotary_valve: RotaryValveConfig = field(default_factory=RotaryValveConfig)
@@ -163,7 +163,7 @@ def load_config(path: str) -> DeviceConfig:
     data = _load_yaml(path)
 
     return DeviceConfig(
-        device_id=data.get("device_id", "device2"),
+        device_id=data.get("device_id", "device1"),
         network=NetworkConfig(**data.get("network", {})),
         relay=RelayConfig(**data.get("relay", {})),
         rotary_valve=RotaryValveConfig(**data.get("rotary_valve", {})),

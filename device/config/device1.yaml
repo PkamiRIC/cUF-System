@@ -1,6 +1,6 @@
-device_id: "device2"
+device_id: "device1"
 network:
-  api_port: 8002
+  api_port: 8001
 auth:
   advanced_controls_password: "raspberry"
 relay:
