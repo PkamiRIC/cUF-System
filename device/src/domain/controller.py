@@ -119,6 +119,10 @@ class DeviceController:
         if self._sequence_thread and self._sequence_thread.is_alive():
             raise RuntimeError("A sequence is already running")
 
+        ok, messages = self._check_start_conditions()
+        if not ok:
+            raise RuntimeError("; ".join(messages))
+
         with self._state_lock:
             self.state.state = "RUNNING"
             self.state.current_sequence = sequence_name
@@ -136,6 +140,18 @@ class DeviceController:
 
     def stop_sequence(self) -> None:
         self._stop_event.set()
+        try:
+            self.peristaltic.set_enabled(False)
+        except Exception:
+            pass
+        try:
+            self.pid_valve.set_enabled(False)
+        except Exception:
+            pass
+        try:
+            self._force_close_elute_valve()
+        except Exception:
+            pass
         with self._state_lock:
             self.state.stop_requested = True
             self.state.state = "ERROR"
@@ -371,23 +387,22 @@ class DeviceController:
     def _run_sequence(self, sequence_name: str) -> None:
         seq = sequence_name.lower()
         try:
-            if seq in {"sequence1", "seq1", "maf", "maf1", "deaeration", "concentration"}:
-                steps = ["Pre-checks", "Process", "Finalize"]
-            elif seq in {"sequence2", "seq2", "maf2", "elution"}:
-                steps = ["Pre-checks", "Elution", "Finalize"]
-            elif seq in {"cleaning", "clean", "cleaning_sequence", "clean1", "clean2"}:
-                steps = ["Pre-checks", "Cleaning", "Finalize"]
+            self._force_close_elute_valve()
+
+            if seq in {"full sequence", "full_sequence", "full", "sequence_full"}:
+                self._run_full_sequence()
+            elif seq in {"deaeration"}:
+                self._run_deaeration()
+            elif seq in {"concentration", "sequence1", "seq1", "maf", "maf1"}:
+                self._run_concentration()
+            elif seq in {"elution", "sequence2", "seq2", "maf2"}:
+                self._run_elution()
+            elif seq in {"clean 1", "clean1"}:
+                self._run_clean1()
+            elif seq in {"clean 2", "clean2", "cleaning", "clean", "cleaning_sequence"}:
+                self._run_clean2()
             else:
                 raise ValueError(f"Unknown sequence '{sequence_name}'")
-
-            for step in steps:
-                if self._stop_event.is_set():
-                    raise RuntimeError("Operation stopped")
-                with self._state_lock:
-                    self.state.sequence_step = step
-                self._append_log(f"[{sequence_name}] {step}")
-                self._broadcast_status()
-                time.sleep(1.0)
 
             with self._state_lock:
                 self.state.state = "IDLE"
@@ -402,8 +417,112 @@ class DeviceController:
                 self.state.sequence_step = None
                 self.state.stop_requested = False
                 self.state.target_volume_ml = None
+            self.peristaltic.set_enabled(False)
+            self.pid_valve.set_enabled(False)
+            self._force_close_elute_valve()
             self._stop_event.clear()
             self._broadcast_status()
+
+    def _run_full_sequence(self) -> None:
+        for step in ("deaeration", "concentration", "elution"):
+            self._check_stop()
+            self._set_sequence_step(f"{step.title()} start")
+            if step == "deaeration":
+                self._run_deaeration()
+            elif step == "concentration":
+                self._run_concentration()
+            else:
+                self._run_elution()
+            self._set_sequence_step(f"{step.title()} complete")
+
+    def _run_deaeration(self) -> None:
+        self._set_sequence_step("Deaeration")
+        self.flow_sensor.reset_totals()
+        self._run_pump_phase(open_relays=[1, 2, 3], seconds=25.0, forward=True, low_speed=False)
+
+    def _run_concentration(self) -> None:
+        self._set_sequence_step("Concentration")
+        target_ml = float(self.state.target_volume_ml or 1000.0)
+        self.flow_sensor.reset_totals()
+        self.pid_valve.set_enabled(True)
+        self.peristaltic.set_direction(True)
+        self.peristaltic.set_speed_checked(True)
+        self.peristaltic.set_enabled(True)
+        self._set_relays([1, 4, 5], True)
+        try:
+            while True:
+                self._check_stop()
+                total_ml = float(self.flow_sensor.read().get("total_ml", 0.0))
+                if total_ml >= target_ml:
+                    break
+                time.sleep(0.2)
+        finally:
+            self.peristaltic.set_enabled(False)
+            self.pid_valve.set_enabled(False)
+            self._set_relays([1, 4, 5], False)
+            self.pid_valve.homing_routine()
+
+    def _run_elution(self) -> None:
+        self._set_sequence_step("Elution")
+        self._set_relay(7, False)  # collect elution position
+        self._run_pump_phase(open_relays=[2, 6], seconds=20.0, forward=True, low_speed=True)
+        self._force_close_elute_valve()
+
+    def _run_clean1(self) -> None:
+        self._set_sequence_step("Clean 1")
+        self._run_pump_phase(open_relays=[5, 6], seconds=20.0, forward=False, low_speed=False)
+
+    def _run_clean2(self) -> None:
+        self._set_sequence_step("Clean 2")
+        self._run_pump_phase(open_relays=[3, 6], seconds=20.0, forward=True, low_speed=False)
+
+    def _run_pump_phase(self, open_relays: list[int], seconds: float, forward: bool, low_speed: bool) -> None:
+        self._set_relays(open_relays, True)
+        self.peristaltic.set_direction(forward)
+        self.peristaltic.set_speed_checked(low_speed)
+        self.peristaltic.set_enabled(True)
+        try:
+            self._wait_interruptible(seconds)
+        finally:
+            self.peristaltic.set_enabled(False)
+            self._set_relays(open_relays, False)
+
+    def _force_close_elute_valve(self) -> None:
+        # MainGUI_v5 reset behavior: relay 7 set to default (non-collect) state.
+        self._set_relay(7, True)
+
+    def _set_relays(self, channels: list[int], enabled: bool) -> None:
+        for ch in channels:
+            self._set_relay(ch, enabled)
+
+    def _wait_interruptible(self, seconds: float) -> None:
+        end = time.time() + max(0.0, seconds)
+        while time.time() < end:
+            self._check_stop()
+            time.sleep(0.1)
+
+    def _check_stop(self) -> None:
+        if self._stop_event.is_set():
+            raise RuntimeError("Operation stopped")
+
+    def _set_sequence_step(self, step: str) -> None:
+        with self._state_lock:
+            self.state.sequence_step = step
+        self._append_log(step)
+        self._broadcast_status()
+
+    def _check_start_conditions(self):
+        states = dict(self.state.level_states or {})
+        messages = []
+        if not states.get("H2O", False):
+            messages.append("Fill H2O")
+        if not states.get("NaOH", False):
+            messages.append("Fill NaOH")
+        if not states.get("Drain Sample", False):
+            messages.append("Empty Drain Sample")
+        if not states.get("Drain Cleaning", False):
+            messages.append("Empty Drain Cleaning")
+        return (len(messages) == 0, messages)
 
     def _set_relay(self, channel: int, enabled: bool) -> bool:
         ok = self.relays.on(channel) if enabled else self.relays.off(channel)

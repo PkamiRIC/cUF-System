@@ -39,11 +39,11 @@ const valves: ValveConfig[] = [
 ]
 
 const legacySequenceMap: Record<string, string> = {
-  Deaeration: "sequence1",
-  Concentration: "sequence1",
-  Elution: "sequence2",
-  "Clean 1": "cleaning",
-  "Clean 2": "cleaning",
+  Deaeration: "deaeration",
+  Concentration: "concentration",
+  Elution: "elution",
+  "Clean 1": "clean1",
+  "Clean 2": "clean2",
 }
 
 async function post(path: string, body?: unknown) {
@@ -253,17 +253,11 @@ export default function LegacyConsole() {
     setBusy(true)
     setError(null)
     try {
-      const order = ["Deaeration", "Concentration", "Elution"]
+      const liters = Number.parseFloat(targetLitersDraft)
+      const payload = Number.isFinite(liters) ? { target_volume_ml: liters * 1000 } : undefined
       addLog("Full Sequence started.", "Full Sequence")
-      for (const step of order) {
-        const mapped = legacySequenceMap[step]
-        const liters = Number.parseFloat(targetLitersDraft)
-        const payload = Number.isFinite(liters) ? { target_volume_ml: liters * 1000 } : undefined
-        addLog(`${step} sequence started (Full Sequence).`, "Full Sequence")
-        await post(`/command/start/${mapped}`, payload)
-        await waitUntilIdle()
-        addLog(`${step} sequence completed (Full Sequence).`, "Full Sequence")
-      }
+      await post("/command/start/full_sequence", payload)
+      await waitUntilIdle()
       addLog("Full Sequence completed.", "Full Sequence")
     } catch (err: any) {
       setError(err?.message || "Full Sequence failed")
