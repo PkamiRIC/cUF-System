@@ -3,18 +3,28 @@ import serial
 
 from infra.config import RelayConfig
 from hardware.serial_port_lock import get_port_lock
+from hardware.plc_utils import plc, ensure_plc_init
 
 
 class RelayBoard:
     """
-    Modbus RTU relay board controlled with Function 0x06 (Write Single Register).
-    - Registers 0x0001..0x0008 control channels 1..8
-    - Open = 0x0100, Close = 0x0200
-    - 0x0000 with 0x0700 / 0x0800 toggles all
+    Relay control adapter.
+
+    Primary path (MainGUI_v5-compatible): use PLC relay outputs R1.1..R1.8.
+    Fallback path: Modbus RTU Function 0x06 (Write Single Register).
     """
 
     def __init__(self, config: RelayConfig) -> None:
         self.config = config
+        self._relay_pin_map = {ch: f"R1.{ch}" for ch in range(1, 9)}
+        ensure_plc_init()
+        if plc:
+            for pin in self._relay_pin_map.values():
+                try:
+                    plc.pin_mode(pin, plc.OUTPUT)
+                except Exception:
+                    # Leave fallback path available if PLC relay pin setup fails.
+                    pass
 
     @staticmethod
     def _crc16_modbus(data: bytes) -> bytes:
@@ -58,28 +68,44 @@ class RelayBoard:
                 resp = serial_port.read(expected_len)
                 return len(resp) == expected_len and resp[: len(pdu)] == pdu
 
+    def _set_via_plc(self, relay_num: int, enabled: bool):
+        if not plc:
+            return None
+        pin = self._relay_pin_map.get(relay_num)
+        if not pin:
+            return False
+        try:
+            level = plc.HIGH if enabled else plc.LOW
+            plc.digital_write(pin, level)
+            plc.delay(10)
+            return True
+        except Exception:
+            return False
+
     def on(self, relay_num: int) -> bool:
         if not (1 <= relay_num <= 8):
             raise ValueError("relay_num must be 1..8")
+        plc_ok = self._set_via_plc(relay_num, True)
+        if plc_ok is not None:
+            return bool(plc_ok)
         return self._write_register(relay_num, 0x0100)
 
     def off(self, relay_num: int) -> bool:
         if not (1 <= relay_num <= 8):
             raise ValueError("relay_num must be 1..8")
+        plc_ok = self._set_via_plc(relay_num, False)
+        if plc_ok is not None:
+            return bool(plc_ok)
         return self._write_register(relay_num, 0x0200)
 
     def all_on(self) -> bool:
-        """
-        All ON command frame (addressed): addr 0x??, 06, 00, 00, 07, 00, CRC16.
-        For addr=0x02 this is: 02 06 00 00 07 00 8B C9
-        """
+        if plc:
+            return all(bool(self._set_via_plc(ch, True)) for ch in range(1, 9))
         pdu = bytes([self.config.address, 0x06, 0x00, 0x00, 0x07, 0x00])
         return self._write_frame(pdu)
 
     def all_off(self) -> bool:
-        """
-        All OFF command frame (addressed): addr 0x??, 06, 00, 00, 08, 00, CRC16.
-        For addr=0x02 this is: 02 06 00 00 08 00 8E 39
-        """
+        if plc:
+            return all(bool(self._set_via_plc(ch, False)) for ch in range(1, 9))
         pdu = bytes([self.config.address, 0x06, 0x00, 0x00, 0x08, 0x00])
         return self._write_frame(pdu)
