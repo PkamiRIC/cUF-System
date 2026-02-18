@@ -21,6 +21,8 @@ type DeviceStatus = {
   pressure_in_mbar?: number | null
   pressure_out_mbar?: number | null
   filter_pressure_mbar?: number | null
+  level_states?: Record<string, boolean>
+  level_sensors_disabled?: boolean
   logs?: string[]
 }
 
@@ -111,6 +113,7 @@ export default function LegacyConsole() {
     ? Number(status.filter_pressure_mbar)
     : 0
   const tmpValue = Number.isFinite(Number(status.tmp_mbar)) ? Number(status.tmp_mbar) : 0
+  const levelStates = status.level_states || {}
 
   const eventLog = useMemo(() => {
     const remote = Array.isArray(status.logs) ? status.logs : []
@@ -261,6 +264,20 @@ export default function LegacyConsole() {
       await refreshStatus()
     } catch (err: any) {
       setError(err?.message || "PID home failed")
+    }
+  }
+
+  const toggleLevelSensorsDisable = async () => {
+    try {
+      const next = !Boolean(status.level_sensors_disabled)
+      await post("/sensors/level/disable", { disabled: next })
+      addLog(
+        next ? "Level sensors check disabled." : "Level sensors check enabled.",
+        "System",
+      )
+      await refreshStatus()
+    } catch (err: any) {
+      setError(err?.message || "Level sensors toggle failed")
     }
   }
 
@@ -543,14 +560,22 @@ export default function LegacyConsole() {
 
           <div className="legacy-bottom-row">
             <div className="legacy-level-row">
-              <span>H2O: --</span>
-              <span className="legacy-led" />
-              <span>NaOH: --</span>
-              <span className="legacy-led" />
-              <span>Drain Sample: --</span>
-              <span className="legacy-led" />
-              <span>Drain Cleaning: --</span>
-              <span className="legacy-led" />
+              <span>H2O: {levelStates.H2O ? "OK" : "LOW"}</span>
+              <span className={`legacy-led ${levelStates.H2O ? "on" : ""}`} />
+              <span>NaOH: {levelStates.NaOH ? "OK" : "LOW"}</span>
+              <span className={`legacy-led ${levelStates.NaOH ? "on" : ""}`} />
+              <span>Drain Sample: {levelStates["Drain Sample"] ? "OK" : "FULL"}</span>
+              <span className={`legacy-led ${levelStates["Drain Sample"] ? "on" : ""}`} />
+              <span>Drain Cleaning: {levelStates["Drain Cleaning"] ? "OK" : "FULL"}</span>
+              <span className={`legacy-led ${levelStates["Drain Cleaning"] ? "on" : ""}`} />
+              <button
+                className={`legacy-btn ${status.level_sensors_disabled ? "active-green" : ""}`}
+                onClick={toggleLevelSensorsDisable}
+                disabled={busy}
+                style={{ minHeight: 32, padding: "0 12px", borderRadius: 10 }}
+              >
+                {status.level_sensors_disabled ? "Level Sensors Disabled" : "Disable Level Sensors"}
+              </button>
             </div>
 
             <div className="legacy-actions-row">

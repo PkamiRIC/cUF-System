@@ -42,6 +42,7 @@ class DeviceState:
     tmp_mbar: Optional[float] = None
 
     level_states: dict = field(default_factory=dict)
+    level_sensors_disabled: bool = False
     target_volume_ml: Optional[float] = None
 
 
@@ -298,6 +299,16 @@ class DeviceController:
             self.state.flow_error = self.flow_sensor.get_last_error()
         self._broadcast_status()
 
+    def set_level_sensors_disabled(self, disabled: bool) -> None:
+        with self._state_lock:
+            self.state.level_sensors_disabled = bool(disabled)
+        self._log(
+            "Level sensors check disabled."
+            if disabled
+            else "Level sensors check enabled."
+        )
+        self._broadcast_status()
+
     # ---------------------------------------------------
     # NOT USED BY MainGUI_v5 (kept for API compatibility)
     # ---------------------------------------------------
@@ -512,6 +523,8 @@ class DeviceController:
         self._broadcast_status()
 
     def _check_start_conditions(self):
+        if bool(self.state.level_sensors_disabled):
+            return (True, [])
         states = dict(self.state.level_states or {})
         messages = []
         if not states.get("H2O", False):
