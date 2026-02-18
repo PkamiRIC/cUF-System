@@ -18,6 +18,9 @@ type DeviceStatus = {
   flow_ml_min?: number
   total_ml?: number
   tmp_mbar?: number | null
+  pressure_in_mbar?: number | null
+  pressure_out_mbar?: number | null
+  filter_pressure_mbar?: number | null
   logs?: string[]
 }
 
@@ -102,6 +105,12 @@ export default function LegacyConsole() {
   const flowLpm = ((status.flow_ml_min ?? 0) / 1000).toFixed(2)
   const totalLiters = ((status.total_ml ?? 0) / 1000).toFixed(2)
   const hallHigh = Boolean(status.pid_hall)
+  const pressureIn = Number.isFinite(Number(status.pressure_in_mbar)) ? Number(status.pressure_in_mbar) : 0
+  const pressureOut = Number.isFinite(Number(status.pressure_out_mbar)) ? Number(status.pressure_out_mbar) : 0
+  const filterPressure = Number.isFinite(Number(status.filter_pressure_mbar))
+    ? Number(status.filter_pressure_mbar)
+    : 0
+  const tmpValue = Number.isFinite(Number(status.tmp_mbar)) ? Number(status.tmp_mbar) : 0
 
   const eventLog = useMemo(() => {
     const remote = Array.isArray(status.logs) ? status.logs : []
@@ -117,6 +126,9 @@ export default function LegacyConsole() {
     try {
       const data = await fetchStatus()
       setStatus(data)
+      const rawTmp = Number(data.tmp_mbar)
+      const tmp = Number.isFinite(rawTmp) ? Math.max(0, Math.min(200, rawTmp)) : 0
+      setTmpHistory((prev) => [...prev, tmp].slice(-100))
       if (!busy && typeof data.pid_setpoint === "number") {
         setSetpointDraft(data.pid_setpoint.toFixed(1))
       }
@@ -137,12 +149,6 @@ export default function LegacyConsole() {
     }
   }, [])
 
-  useEffect(() => {
-    const tmp = Number(status.tmp_mbar)
-    if (!Number.isFinite(tmp)) return
-    setTmpHistory((prev) => [...prev, tmp].slice(-100))
-  }, [status.tmp_mbar])
-
   const waitUntilIdle = async (timeoutMs = 240000) => {
     const started = Date.now()
     while (Date.now() - started < timeoutMs) {
@@ -157,19 +163,26 @@ export default function LegacyConsole() {
 
   const tmpGraph = useMemo(() => {
     if (tmpHistory.length < 2) return null
-    const width = 600
-    const height = 180
-    const min = Math.min(...tmpHistory)
-    const max = Math.max(...tmpHistory)
-    const range = Math.max(1, max - min)
-    const points = tmpHistory
+    const chartWidth = 560
+    const chartHeight = 150
+    const padLeft = 34
+    const padRight = 8
+    const padTop = 8
+    const padBottom = 24
+    const width = chartWidth + padLeft + padRight
+    const height = chartHeight + padTop + padBottom
+    const yMin = 0
+    const yMax = 200
+    const yRange = yMax - yMin
+    const display = tmpHistory.slice(-30)
+    const points = display
       .map((v, i) => {
-        const x = (i / (tmpHistory.length - 1)) * (width - 1)
-        const y = height - 1 - ((v - min) / range) * (height - 1)
+        const x = padLeft + (i / Math.max(1, display.length - 1)) * (chartWidth - 1)
+        const y = padTop + (1 - (v - yMin) / yRange) * (chartHeight - 1)
         return `${x.toFixed(2)},${y.toFixed(2)}`
       })
       .join(" ")
-    return { width, height, points, min, max }
+    return { width, height, points, chartWidth, chartHeight, padLeft, padTop, padBottom }
   }, [tmpHistory])
 
   const toggleValve = async (relay: number, enabled: boolean) => {
@@ -346,10 +359,10 @@ export default function LegacyConsole() {
           <section className="legacy-panel legacy-metrics-panel">
             <h2 className="legacy-panel-title">Process Metrics</h2>
             <div className="legacy-metrics-grid">
-              <p>Pressure IN: -- mBar</p>
-              <p>Pressure OUT: -- mBar</p>
-              <p>Filter Pressure: -- mBar</p>
-              <p>TMP: -- mBar</p>
+              <p>Pressure IN: {pressureIn.toFixed(1)} mBar</p>
+              <p>Pressure OUT: {pressureOut.toFixed(1)} mBar</p>
+              <p>Filter Pressure: {filterPressure.toFixed(1)} mBar</p>
+              <p>TMP: {tmpValue.toFixed(1)} mBar</p>
             </div>
             <div className="legacy-hall-row">
               <span>Hall Sensor: {status.pid_hall == null ? "--" : hallHigh ? "HIGH" : "LOW"}</span>
@@ -362,12 +375,82 @@ export default function LegacyConsole() {
             <div className="legacy-plot-placeholder">
               {tmpGraph ? (
                 <svg viewBox={`0 0 ${tmpGraph.width} ${tmpGraph.height}`} width="100%" height="100%">
+                  {[0, 50, 100, 150, 200].map((tick) => {
+                    const y = tmpGraph.padTop + (1 - tick / 200) * (tmpGraph.chartHeight - 1)
+                    return (
+                      <g key={`y-${tick}`}>
+                        <line
+                          x1={tmpGraph.padLeft}
+                          y1={y}
+                          x2={tmpGraph.padLeft + tmpGraph.chartWidth}
+                          y2={y}
+                          stroke="#334155"
+                          strokeWidth="1"
+                        />
+                        <text x={tmpGraph.padLeft - 6} y={y + 4} textAnchor="end" fill="#94a3b8" fontSize="10">
+                          {tick}
+                        </text>
+                      </g>
+                    )
+                  })}
+                  {[0, 5, 10, 15, 20, 25, 30].map((sec) => {
+                    const x = tmpGraph.padLeft + (sec / 30) * (tmpGraph.chartWidth - 1)
+                    return (
+                      <g key={`x-${sec}`}>
+                        <line
+                          x1={x}
+                          y1={tmpGraph.padTop}
+                          x2={x}
+                          y2={tmpGraph.padTop + tmpGraph.chartHeight}
+                          stroke="#1f2937"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={x}
+                          y={tmpGraph.padTop + tmpGraph.chartHeight + 14}
+                          textAnchor="middle"
+                          fill="#94a3b8"
+                          fontSize="10"
+                        >
+                          {sec}
+                        </text>
+                      </g>
+                    )
+                  })}
+                  <line
+                    x1={tmpGraph.padLeft}
+                    y1={tmpGraph.padTop + tmpGraph.chartHeight}
+                    x2={tmpGraph.padLeft + tmpGraph.chartWidth}
+                    y2={tmpGraph.padTop + tmpGraph.chartHeight}
+                    stroke="#475569"
+                    strokeWidth="1.2"
+                  />
+                  <line
+                    x1={tmpGraph.padLeft}
+                    y1={tmpGraph.padTop}
+                    x2={tmpGraph.padLeft}
+                    y2={tmpGraph.padTop + tmpGraph.chartHeight}
+                    stroke="#475569"
+                    strokeWidth="1.2"
+                  />
                   <polyline
                     fill="none"
                     stroke="#38bdf8"
                     strokeWidth="2"
                     points={tmpGraph.points}
                   />
+                  <text x={8} y={tmpGraph.padTop + 10} fill="#94a3b8" fontSize="10">
+                    TMP (mBar)
+                  </text>
+                  <text
+                    x={tmpGraph.padLeft + tmpGraph.chartWidth - 2}
+                    y={tmpGraph.padTop + tmpGraph.chartHeight + tmpGraph.padBottom - 4}
+                    fill="#94a3b8"
+                    fontSize="10"
+                    textAnchor="end"
+                  >
+                    Time (s)
+                  </text>
                 </svg>
               ) : (
                 "Waiting for TMP data..."
