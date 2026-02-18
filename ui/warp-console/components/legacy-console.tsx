@@ -17,6 +17,7 @@ type DeviceStatus = {
   pid_hall?: number | null
   flow_ml_min?: number
   total_ml?: number
+  tmp_mbar?: number | null
   logs?: string[]
 }
 
@@ -87,6 +88,7 @@ function withTimestamp(message: string, context = "System"): string {
 
 export default function LegacyConsole() {
   const [status, setStatus] = useState<DeviceStatus>({})
+  const [tmpHistory, setTmpHistory] = useState<number[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [setpointDraft, setSetpointDraft] = useState("80.0")
   const [targetLitersDraft, setTargetLitersDraft] = useState("1.0")
@@ -135,6 +137,12 @@ export default function LegacyConsole() {
     }
   }, [])
 
+  useEffect(() => {
+    const tmp = Number(status.tmp_mbar)
+    if (!Number.isFinite(tmp)) return
+    setTmpHistory((prev) => [...prev, tmp].slice(-100))
+  }, [status.tmp_mbar])
+
   const waitUntilIdle = async (timeoutMs = 240000) => {
     const started = Date.now()
     while (Date.now() - started < timeoutMs) {
@@ -146,6 +154,23 @@ export default function LegacyConsole() {
     }
     throw new Error("Timed out waiting for sequence to finish")
   }
+
+  const tmpGraph = useMemo(() => {
+    if (tmpHistory.length < 2) return null
+    const width = 600
+    const height = 180
+    const min = Math.min(...tmpHistory)
+    const max = Math.max(...tmpHistory)
+    const range = Math.max(1, max - min)
+    const points = tmpHistory
+      .map((v, i) => {
+        const x = (i / (tmpHistory.length - 1)) * (width - 1)
+        const y = height - 1 - ((v - min) / range) * (height - 1)
+        return `${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(" ")
+    return { width, height, points, min, max }
+  }, [tmpHistory])
 
   const toggleValve = async (relay: number, enabled: boolean) => {
     try {
@@ -334,7 +359,20 @@ export default function LegacyConsole() {
               <span>Flow Rate: {flowLpm} L/min</span>
               <span>Total Volume: {totalLiters.padStart(5, "0")} L</span>
             </div>
-            <div className="legacy-plot-placeholder">TMP trend available on backend status stream</div>
+            <div className="legacy-plot-placeholder">
+              {tmpGraph ? (
+                <svg viewBox={`0 0 ${tmpGraph.width} ${tmpGraph.height}`} width="100%" height="100%">
+                  <polyline
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth="2"
+                    points={tmpGraph.points}
+                  />
+                </svg>
+              ) : (
+                "Waiting for TMP data..."
+              )}
+            </div>
           </section>
 
           <section className="legacy-panel">
