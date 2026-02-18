@@ -11,6 +11,11 @@ from hardware.pid_valve import PidValveController
 from hardware.plc_utils import plc, safe_plc_call, ensure_plc_init
 from hardware.relay_board import RelayBoard
 from infra.config import DeviceConfig
+from domain.deaeration import run_deaeration
+from domain.concentration import run_concentration
+from domain.elution import run_elution
+from domain.clean1 import run_clean1
+from domain.clean2 import run_clean2
 
 
 @dataclass
@@ -448,44 +453,69 @@ class DeviceController:
 
     def _run_deaeration(self) -> None:
         self._set_sequence_step("Deaeration")
-        self.flow_sensor.reset_totals()
-        self._run_pump_phase(open_relays=[1, 2, 3], seconds=25.0, forward=True, low_speed=False)
+        run_deaeration(
+            stop_flag=lambda: self._stop_event.is_set(),
+            log=self._append_log,
+            reset_flow_totals=self.flow_sensor.reset_totals,
+            set_relays=self._set_relays,
+            set_pump_direction=self.peristaltic.set_direction,
+            set_pump_low_speed=self.peristaltic.set_speed_checked,
+            set_pump_enabled=self.peristaltic.set_enabled,
+            duration_s=25.0,
+        )
 
     def _run_concentration(self) -> None:
         self._set_sequence_step("Concentration")
-        target_ml = float(self.state.target_volume_ml or 1000.0)
-        self.flow_sensor.reset_totals()
-        self.pid_valve.set_enabled(True)
-        self.peristaltic.set_direction(True)
-        self.peristaltic.set_speed_checked(True)
-        self.peristaltic.set_enabled(True)
-        self._set_relays([1, 4, 5], True)
-        try:
-            while True:
-                self._check_stop()
-                total_ml = float(self.flow_sensor.read().get("total_ml", 0.0))
-                if total_ml >= target_ml:
-                    break
-                time.sleep(0.2)
-        finally:
-            self.peristaltic.set_enabled(False)
-            self.pid_valve.set_enabled(False)
-            self._set_relays([1, 4, 5], False)
-            self.pid_valve.homing_routine()
+        run_concentration(
+            stop_flag=lambda: self._stop_event.is_set(),
+            log=self._append_log,
+            reset_flow_totals=self.flow_sensor.reset_totals,
+            get_total_volume_ml=lambda: float(self.flow_sensor.read().get("total_ml", 0.0)),
+            target_volume_ml=float(self.state.target_volume_ml or 1000.0),
+            set_relays=self._set_relays,
+            set_pump_direction=self.peristaltic.set_direction,
+            set_pump_low_speed=self.peristaltic.set_speed_checked,
+            set_pump_enabled=self.peristaltic.set_enabled,
+            set_pid_enabled=self.pid_valve.set_enabled,
+            home_pid=self.pid_valve.homing_routine,
+        )
 
     def _run_elution(self) -> None:
         self._set_sequence_step("Elution")
-        self._set_relay(7, False)  # collect elution position
-        self._run_pump_phase(open_relays=[2, 6], seconds=20.0, forward=True, low_speed=True)
-        self._force_close_elute_valve()
+        run_elution(
+            stop_flag=lambda: self._stop_event.is_set(),
+            log=self._append_log,
+            set_relay=self._set_relay,
+            set_relays=self._set_relays,
+            set_pump_direction=self.peristaltic.set_direction,
+            set_pump_low_speed=self.peristaltic.set_speed_checked,
+            set_pump_enabled=self.peristaltic.set_enabled,
+            duration_s=20.0,
+        )
 
     def _run_clean1(self) -> None:
         self._set_sequence_step("Clean 1")
-        self._run_pump_phase(open_relays=[5, 6], seconds=20.0, forward=False, low_speed=False)
+        run_clean1(
+            stop_flag=lambda: self._stop_event.is_set(),
+            log=self._append_log,
+            set_relays=self._set_relays,
+            set_pump_direction=self.peristaltic.set_direction,
+            set_pump_low_speed=self.peristaltic.set_speed_checked,
+            set_pump_enabled=self.peristaltic.set_enabled,
+            duration_s=20.0,
+        )
 
     def _run_clean2(self) -> None:
         self._set_sequence_step("Clean 2")
-        self._run_pump_phase(open_relays=[3, 6], seconds=20.0, forward=True, low_speed=False)
+        run_clean2(
+            stop_flag=lambda: self._stop_event.is_set(),
+            log=self._append_log,
+            set_relays=self._set_relays,
+            set_pump_direction=self.peristaltic.set_direction,
+            set_pump_low_speed=self.peristaltic.set_speed_checked,
+            set_pump_enabled=self.peristaltic.set_enabled,
+            duration_s=20.0,
+        )
 
     def _run_pump_phase(self, open_relays: list[int], seconds: float, forward: bool, low_speed: bool) -> None:
         self._set_relays(open_relays, True)
