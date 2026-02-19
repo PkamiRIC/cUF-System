@@ -174,23 +174,56 @@ input {
 
 .legacy-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 10px;
+  gap: 8px;
+}
+
+.legacy-form-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.legacy-form-row label {
+  font-size: 12px;
+}
+
+.legacy-form-control {
+  display: flex;
   align-items: center;
+  gap: 8px;
 }
 
-.legacy-form-grid label {
-  font-size: 13px;
-}
-
-.legacy-form-grid input {
-  height: 30px;
-  border-radius: 10px;
+.legacy-form-control input {
+  width: 112px;
+  height: 28px;
+  border-radius: 8px;
   border: 1px solid var(--panel-border);
   background: #0f172a;
   color: var(--text-strong);
   text-align: center;
-  padding: 0 8px;
+  padding: 0 6px;
+}
+
+.legacy-apply-btn {
+  height: 28px;
+  min-width: 56px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.legacy-apply-btn:hover {
+  background: var(--primary-hover);
+}
+
+.legacy-apply-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .legacy-sequences-panel {
