@@ -98,11 +98,15 @@ export default function LegacyConsole() {
   const [setpointDraft, setSetpointDraft] = useState("80.0")
   const [targetLitersDraft, setTargetLitersDraft] = useState("1.0")
   const [cleanTimeDraft, setCleanTimeDraft] = useState("20.0")
+  const [appliedTargetLiters, setAppliedTargetLiters] = useState(1.0)
+  const [appliedCleanTimeMinutes, setAppliedCleanTimeMinutes] = useState(20.0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [localLogs, setLocalLogs] = useState<string[]>([])
   const [stopFlash, setStopFlash] = useState(false)
   const [resetFlash, setResetFlash] = useState(false)
+  const sequenceRunning = String(status.state || "").toUpperCase() === "RUNNING"
+  const controlsLocked = busy || sequenceRunning
 
   const flowLpm = ((status.flow_ml_min ?? 0) / 1000).toFixed(2)
   const totalLiters = ((status.total_ml ?? 0) / 1000).toFixed(2)
@@ -242,6 +246,10 @@ export default function LegacyConsole() {
   }
 
   const applyPidSetpoint = async () => {
+    if (controlsLocked) {
+      setError("Cannot apply setpoint while a sequence is running")
+      return
+    }
     const value = Number.parseFloat(setpointDraft)
     if (!Number.isFinite(value)) {
       setError("Invalid setpoint value")
@@ -255,6 +263,38 @@ export default function LegacyConsole() {
     } catch (err: any) {
       setError(err?.message || "PID setpoint failed")
     }
+  }
+
+  const applyTargetVolume = () => {
+    if (controlsLocked) {
+      setError("Cannot apply target volume while a sequence is running")
+      return
+    }
+    const liters = Number.parseFloat(targetLitersDraft)
+    if (!Number.isFinite(liters) || liters <= 0) {
+      setError("Invalid target volume")
+      return
+    }
+    setAppliedTargetLiters(liters)
+    setTargetLitersDraft(liters.toFixed(1))
+    setError(null)
+    addLog(`Target volume applied: ${liters.toFixed(1)} L`)
+  }
+
+  const applyCleanTime = () => {
+    if (controlsLocked) {
+      setError("Cannot apply clean time while a sequence is running")
+      return
+    }
+    const minutes = Number.parseFloat(cleanTimeDraft)
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      setError("Invalid clean time")
+      return
+    }
+    setAppliedCleanTimeMinutes(minutes)
+    setCleanTimeDraft(minutes.toFixed(1))
+    setError(null)
+    addLog(`Clean time applied: ${minutes.toFixed(1)} min`)
   }
 
   const homePid = async () => {
@@ -285,14 +325,19 @@ export default function LegacyConsole() {
     const mapped = legacySequenceMap[legacyName]
     if (!mapped) return
 
-    const liters = Number.parseFloat(targetLitersDraft)
-    const payload = Number.isFinite(liters) ? { target_volume_ml: liters * 1000 } : undefined
+    const liters = appliedTargetLiters
+    const cleanMinutes = appliedCleanTimeMinutes
+    const payload: Record<string, number> = {}
+    if (Number.isFinite(liters)) payload.target_volume_ml = liters * 1000
+    if (legacyName === "Clean 1" && Number.isFinite(cleanMinutes)) {
+      payload.clean_time_minutes = cleanMinutes
+    }
 
     setBusy(true)
     setError(null)
     try {
       addLog(`${legacyName} sequence started.`, legacyName)
-      await post(`/command/start/${mapped}`, payload)
+      await post(`/command/start/${mapped}`, Object.keys(payload).length ? payload : undefined)
       await waitUntilIdle()
       addLog(`${legacyName} sequence completed.`, legacyName)
     } catch (err: any) {
@@ -308,8 +353,9 @@ export default function LegacyConsole() {
     setBusy(true)
     setError(null)
     try {
-      const liters = Number.parseFloat(targetLitersDraft)
-      const payload = Number.isFinite(liters) ? { target_volume_ml: liters * 1000 } : undefined
+      const payload = Number.isFinite(appliedTargetLiters)
+        ? { target_volume_ml: appliedTargetLiters * 1000 }
+        : undefined
       addLog("Full Sequence started.", "Full Sequence")
       await post("/command/start/full_sequence", payload)
       await waitUntilIdle()
@@ -481,14 +527,14 @@ export default function LegacyConsole() {
               <button
                 className={`legacy-btn ${status.peristaltic_enabled ? "active" : ""}`}
                 onClick={togglePumpEnable}
-                disabled={busy}
+                disabled={controlsLocked}
               >
                 {status.peristaltic_enabled ? "Pump ON" : "Pump OFF"}
               </button>
-              <button className={`legacy-btn ${status.peristaltic_direction_cw ? "active" : ""}`} onClick={togglePumpDirection} disabled={busy}>
+              <button className={`legacy-btn ${status.peristaltic_direction_cw ? "active" : ""}`} onClick={togglePumpDirection} disabled={controlsLocked}>
                 {status.peristaltic_direction_cw ? "Dir: CW" : "Dir CCW"}
               </button>
-              <button className={`legacy-btn ${status.peristaltic_low_speed ? "active" : ""}`} onClick={togglePumpSpeed} disabled={busy}>
+              <button className={`legacy-btn ${status.peristaltic_low_speed ? "active" : ""}`} onClick={togglePumpSpeed} disabled={controlsLocked}>
                 {status.peristaltic_low_speed ? "Low Speed" : "High Speed"}
               </button>
             </div>
@@ -497,40 +543,60 @@ export default function LegacyConsole() {
               <button
                 className={`legacy-btn ${status.pid_enabled ? "active-green" : ""}`}
                 onClick={togglePid}
-                disabled={busy}
+                disabled={controlsLocked}
               >
                 {status.pid_enabled ? "PID Enabled" : "Enable PID"}
               </button>
-              <button className="legacy-btn" onClick={homePid} disabled={busy}>
+              <button className="legacy-btn" onClick={homePid} disabled={controlsLocked}>
                 Home Valve
               </button>
             </div>
 
             <div className="legacy-form-grid">
-              <label htmlFor="setpoint">Setpoint (mBar)</label>
-              <input
-                id="setpoint"
-                value={setpointDraft}
-                onChange={(e) => setSetpointDraft(e.target.value)}
-                onBlur={applyPidSetpoint}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void applyPidSetpoint()
-                }}
-              />
+              <div className="legacy-form-row">
+                <label htmlFor="setpoint">Setpoint (mBar)</label>
+                <div className="legacy-form-control">
+                  <input
+                    id="setpoint"
+                    value={setpointDraft}
+                    onChange={(e) => setSetpointDraft(e.target.value)}
+                    disabled={controlsLocked}
+                  />
+                  <button className="legacy-apply-btn" onClick={applyPidSetpoint} disabled={controlsLocked}>
+                    Apply
+                  </button>
+                </div>
+              </div>
 
-              <label htmlFor="target-liters">Target Volume (L)</label>
-              <input
-                id="target-liters"
-                value={targetLitersDraft}
-                onChange={(e) => setTargetLitersDraft(e.target.value)}
-              />
+              <div className="legacy-form-row">
+                <label htmlFor="target-liters">Target Volume (L)</label>
+                <div className="legacy-form-control">
+                  <input
+                    id="target-liters"
+                    value={targetLitersDraft}
+                    onChange={(e) => setTargetLitersDraft(e.target.value)}
+                    disabled={controlsLocked}
+                  />
+                  <button className="legacy-apply-btn" onClick={applyTargetVolume} disabled={controlsLocked}>
+                    Apply
+                  </button>
+                </div>
+              </div>
 
-              <label htmlFor="clean-time">Clean Time (min)</label>
-              <input
-                id="clean-time"
-                value={cleanTimeDraft}
-                onChange={(e) => setCleanTimeDraft(e.target.value)}
-              />
+              <div className="legacy-form-row">
+                <label htmlFor="clean-time">Clean Time (min)</label>
+                <div className="legacy-form-control">
+                  <input
+                    id="clean-time"
+                    value={cleanTimeDraft}
+                    onChange={(e) => setCleanTimeDraft(e.target.value)}
+                    disabled={controlsLocked}
+                  />
+                  <button className="legacy-apply-btn" onClick={applyCleanTime} disabled={controlsLocked}>
+                    Apply
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -538,22 +604,22 @@ export default function LegacyConsole() {
         <section className="legacy-panel legacy-sequences-panel">
           <h2 className="legacy-panel-title">Sequences</h2>
           <div className="legacy-sequence-grid">
-            <button className="legacy-seq-btn" onClick={runFullSequence} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={runFullSequence} disabled={controlsLocked}>
               Full Sequence
             </button>
-            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Deaeration")} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Deaeration")} disabled={controlsLocked}>
               Deaeration
             </button>
-            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Concentration")} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Concentration")} disabled={controlsLocked}>
               Concentration
             </button>
-            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Elution")} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Elution")} disabled={controlsLocked}>
               Elution
             </button>
-            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Clean 1")} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Clean 1")} disabled={controlsLocked}>
               Clean 1
             </button>
-            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Clean 2")} disabled={busy}>
+            <button className="legacy-seq-btn" onClick={() => runLegacySequence("Clean 2")} disabled={controlsLocked}>
               Clean 2
             </button>
           </div>
@@ -571,7 +637,7 @@ export default function LegacyConsole() {
               <button
                 className={`legacy-btn ${status.level_sensors_disabled ? "active-green" : ""}`}
                 onClick={toggleLevelSensorsDisable}
-                disabled={busy}
+                disabled={controlsLocked}
                 style={{ minHeight: 32, padding: "0 12px", borderRadius: 10 }}
               >
                 {status.level_sensors_disabled ? "Level Sensors Disabled" : "Disable Level Sensors"}
@@ -580,7 +646,7 @@ export default function LegacyConsole() {
 
             <div className="legacy-actions-row">
               <span className="legacy-timer">Timer: {fmtTimer(elapsedSeconds)}</span>
-              <button className={`legacy-reset-btn ${resetFlash ? "flash" : ""}`} onClick={resetMetrics} disabled={busy}>
+              <button className={`legacy-reset-btn ${resetFlash ? "flash" : ""}`} onClick={resetMetrics} disabled={controlsLocked}>
                 {resetFlash ? "Reset ?" : "Reset Metrics"}
               </button>
               <button className={`legacy-stop-btn ${stopFlash ? "flash" : ""}`} onClick={handleStop}>

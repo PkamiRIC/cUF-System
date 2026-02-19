@@ -56,6 +56,7 @@ class LevelSensorsDisable(BaseModel):
 class StartSequence(BaseModel):
     target_volume_ml: Optional[float] = None
     temp_target_c: Optional[float] = None
+    clean_time_minutes: Optional[float] = None
 
 
 class AdvancedUnlockPayload(BaseModel):
@@ -93,10 +94,12 @@ def create_app(config: DeviceConfig, config_path: str):
         try:
             target_ml = payload.target_volume_ml if payload else None
             temp_target_c = payload.temp_target_c if payload else None
+            clean_time_minutes = payload.clean_time_minutes if payload else None
             controller.start_sequence(
                 sequence_name,
                 target_volume_ml=target_ml,
                 temp_target_c=temp_target_c,
+                clean_time_minutes=clean_time_minutes,
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
