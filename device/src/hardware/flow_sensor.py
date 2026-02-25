@@ -60,6 +60,16 @@ class FlowSensor:
                 return
 
             if not gpio_ready:
+                # MainGUI_v5 did GPIO.cleanup() at startup; do the same defensively
+                # to recover from stale edge-detect state after unclean restarts.
+                try:
+                    GPIO.remove_event_detect(self.config.gpio_bcm)
+                except Exception:
+                    pass
+                try:
+                    GPIO.cleanup(self.config.gpio_bcm)
+                except Exception:
+                    pass
                 GPIO.setmode(GPIO.BCM)
                 GPIO.setup(self.config.gpio_bcm, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
                 GPIO.add_event_detect(
