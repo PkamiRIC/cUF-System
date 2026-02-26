@@ -5,9 +5,9 @@ from typing import Optional
 from infra.config import FlowSensorConfig
 
 try:
-    import pigpio  # type: ignore
+    import RPi.GPIO as GPIO  # type: ignore
 except Exception:  # pragma: no cover
-    pigpio = None
+    GPIO = None
 
 
 class FlowSensor:
@@ -27,13 +27,8 @@ class FlowSensor:
         self._flow_rate_lpm = 0.0
         self._total_liters = 0.0
         self._worker: Optional[threading.Thread] = None
-        self._pi = None
-        self._cb = None
 
-    def _pulse_callback(self, gpio: int, level: int, tick: int) -> None:
-        # Count falling edges only.
-        if level != 0:
-            return
+    def _pulse_callback(self, channel) -> None:
         with self._lock:
             self._pulse_count += 1
 
@@ -51,9 +46,9 @@ class FlowSensor:
                 self._total_liters += pulses / float(self.config.pulses_per_liter)
 
     def start(self) -> None:
-        if pigpio is None:
+        if GPIO is None:
             with self._lock:
-                self._last_error = "pigpio not available"
+                self._last_error = "RPi.GPIO not available"
                 self._running = False
             return
 
@@ -65,14 +60,22 @@ class FlowSensor:
                 return
 
             if not gpio_ready:
-                pi = pigpio.pi()
-                if not pi.connected:
-                    raise RuntimeError("pigpio daemon not running")
-                pi.set_mode(self.config.gpio_bcm, pigpio.INPUT)
-                pi.set_pull_up_down(self.config.gpio_bcm, pigpio.PUD_DOWN)
-                cb = pi.callback(self.config.gpio_bcm, pigpio.FALLING_EDGE, self._pulse_callback)
-                self._pi = pi
-                self._cb = cb
+                try:
+                    GPIO.remove_event_detect(self.config.gpio_bcm)
+                except Exception:
+                    pass
+                try:
+                    GPIO.cleanup(self.config.gpio_bcm)
+                except Exception:
+                    pass
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(self.config.gpio_bcm, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+                GPIO.add_event_detect(
+                    self.config.gpio_bcm,
+                    GPIO.FALLING,
+                    callback=self._pulse_callback,
+                    bouncetime=1,
+                )
 
             with self._lock:
                 self._running = True
@@ -116,22 +119,16 @@ class FlowSensor:
             return self._last_error
 
     def close(self) -> None:
-        cb = None
-        pi = None
         with self._lock:
             self._running = False
             self._stop_worker = True
-            cb = self._cb
-            pi = self._pi
-            self._cb = None
-            self._pi = None
-        try:
-            if cb is not None:
-                cb.cancel()
-        except Exception:
-            pass
-        try:
-            if pi is not None:
-                pi.stop()
-        except Exception:
-            pass
+        if GPIO is not None:
+            try:
+                if self._gpio_ready:
+                    GPIO.remove_event_detect(self.config.gpio_bcm)
+            except Exception:
+                pass
+            try:
+                GPIO.cleanup()
+            except Exception:
+                pass
