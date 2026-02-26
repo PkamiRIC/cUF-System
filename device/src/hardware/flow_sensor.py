@@ -69,7 +69,9 @@ class FlowSensor:
                 except Exception:
                     pass
                 GPIO.setmode(GPIO.BCM)
-                GPIO.setup(self.config.gpio_bcm, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+                # Flow sensors on this setup behave as open-collector:
+                # idle HIGH via pull-up, pulse goes LOW.
+                GPIO.setup(self.config.gpio_bcm, GPIO.IN, pull_up_down=GPIO.PUD_UP)
                 GPIO.add_event_detect(
                     self.config.gpio_bcm,
                     GPIO.FALLING,
