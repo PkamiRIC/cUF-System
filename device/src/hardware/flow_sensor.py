@@ -31,8 +31,8 @@ class FlowSensor:
         self._cb = None
 
     def _pulse_callback(self, gpio: int, level: int, tick: int) -> None:
-        # Open-collector flow sensor pulses are counted on falling edges.
-        if level != 0:
+        # Match MainGUI_v5 behavior: count rising edges only.
+        if level != 1:
             return
         with self._lock:
             self._pulse_count += 1
@@ -69,8 +69,8 @@ class FlowSensor:
                 if not pi.connected:
                     raise RuntimeError("pigpio daemon not running")
                 pi.set_mode(self.config.gpio_bcm, pigpio.INPUT)
-                pi.set_pull_up_down(self.config.gpio_bcm, pigpio.PUD_UP)
-                cb = pi.callback(self.config.gpio_bcm, pigpio.EITHER_EDGE, self._pulse_callback)
+                pi.set_pull_up_down(self.config.gpio_bcm, pigpio.PUD_DOWN)
+                cb = pi.callback(self.config.gpio_bcm, pigpio.RISING_EDGE, self._pulse_callback)
                 self._pi = pi
                 self._cb = cb
 
