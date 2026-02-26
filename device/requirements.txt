@@ -3,4 +3,3 @@ uvicorn[standard]
 pydantic
 pyyaml
 pyserial
-pigpio
