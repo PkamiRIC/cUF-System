@@ -35,7 +35,7 @@ pid_valve:
 
 # MainGUI_v5 flow pulse meter
 flow_sensor:
-  gpio_bcm: 27
+  gpio_bcm: 17
   pulses_per_liter: 6800.0
 
 # Explicit MainGUI_v5 pinout reference
@@ -49,8 +49,8 @@ maingui_v5_pinout:
     V10: "R1.6"
     Elute: "R1.7"
   flow_meter:
-    gpio_bcm: 27
-    plc_input: "I1.0"
+    gpio_bcm: 17
+    plc_input: "I1.1"
     pulses_per_liter: 6800
   pressure_inputs:
     - "I0.9"
